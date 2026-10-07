@@ -1,6 +1,12 @@
 <template>
   <main>
-    <h1>光伏组串IV扫描台</h1>
+    <header class="topbar">
+      <h1>光伏组串IV扫描台</h1>
+      <nav v-if="session" class="tabs">
+        <button :class="{ active: view === 'logs' }" @click="view = 'logs'">扫描记录</button>
+        <button :class="{ active: view === 'weakest' }" @click="view = 'weakest'">同箱最弱串</button>
+      </nav>
+    </header>
     <div v-if="!session">
       <p class="sub">扫描员提交开路电压、短路电流与填充因子；通知通道叫醒工人出结论。登录框已预填可写账号 scanner / scan123456。</p>
       <section>
@@ -12,46 +18,59 @@
     </div>
     <div v-else>
       <p class="sub">已登录：{{ session.username }}（{{ isWriter ? "可提交" : "只读" }}）</p>
-      <section>
-        <button class="secondary" @click="logout">退出</button>
-        <button class="secondary" @click="refresh">刷新列表</button>
-      </section>
-      <section v-if="isWriter">
-        <label>组串编号</label><input v-model="stringCode" placeholder="例如 阵列C-串05" />
-        <label>开路电压 V</label><input type="number" step="0.1" v-model="voc" />
-        <label>短路电流 A</label><input type="number" step="0.1" v-model="isc" />
-        <label>填充因子</label><input type="number" step="0.01" v-model="ff" />
-        <button :disabled="loading" @click="submit">提交扫描</button>
-        <p v-if="error" class="err">{{ error }}</p>
-      </section>
-      <section>
-        <table>
-          <thead>
-            <tr><th>编号</th><th>组串</th><th>Voc</th><th>Isc</th><th>FF</th><th>状态</th><th>结论</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in logs" :key="row.id">
-              <td>{{ row.id }}</td>
-              <td>{{ row.string_code }}</td>
-              <td>{{ row.voc_v }}</td>
-              <td>{{ row.isc_a }}</td>
-              <td>{{ row.fill_factor }}</td>
-              <td><span class="tag" :class="row.status === 'pending' ? 'pending' : 'ok'">{{ row.status === 'pending' ? '待处理' : '已完成' }}</span></td>
-              <td><span v-if="row.verdict" class="tag" :class="row.verdict === '合格' ? 'ok' : 'bad'">{{ row.verdict }}</span><span v-else>—</span></td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+      <template v-if="view === 'logs'">
+        <section>
+          <button class="secondary" @click="logout">退出</button>
+          <button class="secondary" @click="refresh">刷新列表</button>
+        </section>
+        <section v-if="isWriter">
+          <label>组串编号</label><input v-model="stringCode" placeholder="例如 阵列C-串05" />
+          <label>汇流箱号</label><input v-model="boxNo" placeholder="例如 箱01（同箱最弱串按此归箱）" />
+          <label>开路电压 V</label><input type="number" step="0.1" v-model="voc" />
+          <label>短路电流 A</label><input type="number" step="0.1" v-model="isc" />
+          <label>填充因子</label><input type="number" step="0.01" v-model="ff" />
+          <button :disabled="loading" @click="submit">提交扫描</button>
+          <p v-if="error" class="err">{{ error }}</p>
+        </section>
+        <section>
+          <table>
+            <thead>
+              <tr><th>编号</th><th>组串</th><th>箱号</th><th>Voc</th><th>Isc</th><th>FF</th><th>状态</th><th>结论</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in logs" :key="row.id">
+                <td>{{ row.id }}</td>
+                <td>{{ row.string_code }}</td>
+                <td>{{ row.box_no || "—" }}</td>
+                <td>{{ row.voc_v }}</td>
+                <td>{{ row.isc_a }}</td>
+                <td>{{ row.fill_factor }}</td>
+                <td><span class="tag" :class="row.status === 'pending' ? 'pending' : 'ok'">{{ row.status === 'pending' ? '待处理' : '已完成' }}</span></td>
+                <td><span v-if="row.verdict" class="tag" :class="row.verdict === '合格' ? 'ok' : 'bad'">{{ row.verdict }}</span><span v-else>—</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </template>
+      <template v-else>
+        <section>
+          <button class="secondary" @click="logout">退出</button>
+        </section>
+        <WeakestPage :session="session" @expired="logout" />
+      </template>
     </div>
   </main>
 </template>
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import WeakestPage from "./WeakestPage.vue";
 const session = ref(null);
 const logs = ref([]);
+const view = ref("logs");
 const loginUser = ref("scanner");
 const loginPass = ref("scan123456");
 const stringCode = ref("");
+const boxNo = ref("");
 const voc = ref("");
 const isc = ref("");
 const ff = ref("");
@@ -90,6 +109,7 @@ function logout() {
   if (timer) clearInterval(timer);
   session.value = null;
   logs.value = [];
+  view.value = "logs";
   localStorage.removeItem("pv_session");
 }
 async function submit() {
@@ -101,6 +121,7 @@ async function submit() {
       headers: { "Content-Type": "application/json", ...headers() },
       body: JSON.stringify({
         string_code: stringCode.value,
+        box_no: boxNo.value || null,
         voc_v: Number(voc.value),
         isc_a: Number(isc.value),
         fill_factor: Number(ff.value),
@@ -108,7 +129,7 @@ async function submit() {
     });
     const data = await res.json();
     if (!res.ok) { error.value = data.detail || "提交失败"; return; }
-    stringCode.value = voc.value = isc.value = ff.value = "";
+    stringCode.value = boxNo.value = voc.value = isc.value = ff.value = "";
     await refresh();
   } catch { error.value = "提交时网络异常"; }
   finally { loading.value = false; }
@@ -128,7 +149,11 @@ onUnmounted(() => { if (timer) clearInterval(timer); });
 <style>
 body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #052e16; color: #ecfdf5; }
 main { max-width: 980px; margin: 0 auto; padding: 1.5rem; }
+.topbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
 h1 { color: #86efac; margin: 0 0 0.25rem; }
+.tabs { display: flex; gap: 0.4rem; }
+.tabs button { background: #365314; }
+.tabs button.active { background: #16a34a; }
 .sub { color: #a7f3d0; margin-bottom: 1.25rem; }
 section { background: #14532d; border: 1px solid #166534; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
 label { display: block; font-size: 0.85rem; margin-bottom: 0.25rem; }

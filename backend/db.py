@@ -23,6 +23,21 @@ CREATE TABLE IF NOT EXISTS iv_scans (
     created_at timestamptz NOT NULL,
     processed_at timestamptz
 );
+ALTER TABLE iv_scans ADD COLUMN IF NOT EXISTS box_no text;
+CREATE TABLE IF NOT EXISTS box_weakest_reports (
+    id serial PRIMARY KEY,
+    box_no text NOT NULL,
+    cutoff_at timestamptz NOT NULL,
+    complete boolean NOT NULL,
+    pending_count integer NOT NULL DEFAULT 0,
+    reference_voc double precision,
+    weakest_string text,
+    weakest_voc double precision,
+    weakest_drop double precision,
+    rows jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_by text NOT NULL,
+    created_at timestamptz NOT NULL
+);
 CREATE OR REPLACE FUNCTION notify_iv_scan() RETURNS trigger AS $$
 BEGIN
   PERFORM pg_notify('iv_scan_new', NEW.id::text);
